@@ -1,117 +1,90 @@
-#include "xcore/src/xcore.h"
+#ifndef XRESOURCE_MGR_H
+#define XRESOURCE_MGR_H
+#pragma once
 
-// This is an example of a xresource system
+#include <unordered_map>
+#include "xresource/source/xresource_guid.h"
+
+//----------------------------------------------------------------------------------
+// Example on registering a resource type
+//----------------------------------------------------------------------------------
+// using texture_guid = xresource::guid_def<xresource::type_guid("texture")>;  // First we define the GUID
+//
+// template<>
+// struct xresource::loader< texture_guid.m_Type >                  // Now we specify the loader and we must fill in all the information
+// {
+//      //--- Expected static parameters ---
+//      constexpr static inline auto         name_v      = "Custom Resource Name";      // **** This is optional *****
+//      using                                data_type   = xgpu::texture;               // This is the actual data type of the runtime resource itself...
+//      static data_type*                    Load   ( xresource::mgr& Mgr,                    const full_guid& GUID );
+//      static void                          Destroy( xresource::mgr& Mgr, data_type&& Data,  const full_guid& GUID );
+// };
+// After you have define the loader type you need to register it, like this...
+// inline static xresource::loader_registration<texture_guid.m_Type> UniqueName;
+//
+// The implementation of the above functions should be done in a cpp file
+// This will minimize dependencies and help keep the code clean
+//----------------------------------------------------------------------------------
+
 namespace xresource
 {
     struct mgr;
+    template< type_guid TYPE_GUID_V >
+    struct loader {};
 
-    // The actual GUID
-    // All resources GUIDs has the very first bit turn on
-    // This bit servers as a flag to know if a reference is an actual GUID or a pointer
-    using guid      = xcore::guid::unit<64, struct resource_guid_tag>;
-    static inline guid CreateUniqueGuid( void ) noexcept { auto Guid = guid{xcore::not_null}; Guid.m_Value |= 1; return Guid; }
-
-    // This is the type of the xresource described as a simple GUID
-    using type_guid = xcore::guid::unit<64, struct resource_type_guid_tag>;
-
-    // Resource type
-    template< typename T_RESOURCE_STRUCT_TYPE >
-    struct type
+    namespace details
     {
-        // Expected static parameters
-        // constexpr static inline auto                 name_v = "Custom Resource Name";  // **** This is opcional *****
-        // constexpr static inline xresource::type_guid  guid_v = { "ResourceName" };        
-        // static T_RESOURCE_STRUCT_TYPE*  Load   (                               xresource::mgr& Mgr, xresource::guid GUID );
-        // static void                     Destroy( T_RESOURCE_STRUCT_TYPE& Data, xresource::mgr& Mgr, xresource::guid GUID );
-    };
+        struct registration_base
+        {
+            inline static registration_base* s_pHead = {nullptr};
+            registration_base*               m_pNext;
 
-    template< typename T, typename = void > struct get_custom_name                                               { static inline           const char* value = []{return typeid(T).name();}();  };
-    template< typename T >                  struct get_custom_name< T, std::void_t< typename type<T>::name_v > > { static inline constexpr const char* value = type<T>::name_v;   };
+            registration_base() : m_pNext { s_pHead }
+            {
+                s_pHead = this;
+            }
+                                                            registration_base   ( registration_base&& )                                             = delete;
+                                                            registration_base   ( const registration_base& )                                        = delete;
+                            constexpr virtual              ~registration_base   ( void )                                                            = default;
+                            const registration_base&        operator =          ( const registration_base& )                                        = delete;
+                            const registration_base&        operator =          ( registration_base&& )                                             = delete;
+            [[nodiscard]]   constexpr virtual void*         Load                ( xresource::mgr& Mgr,              const full_guid& GUID ) const   = 0;
+                            constexpr virtual void          Destroy             ( xresource::mgr& Mgr, void* pData, const full_guid& GUID ) const   = 0;
+            [[nodiscard]]   constexpr virtual const char*   getName             ( void )                                                    const   = 0;
+            [[nodiscard]]   constexpr virtual type_guid     getTypeGuid         ( void )                                                    const   = 0;
+        };
 
-    // this simple structure has the actual reference to the xresource
-    // but it needs to know if the actual reference is a pointer or
-    // is a GUID
-    union partial_ref
+        template< type_guid TYPE_GUID_V, typename = void > struct get_custom_name                                                                     { static inline           const char* value = []{return typeid(loader<TYPE_GUID_V>::data_type).name(); }(); };
+        template< type_guid TYPE_GUID_V >                  struct get_custom_name< TYPE_GUID_V, std::void_t< typename loader<TYPE_GUID_V>::name_v > > { static inline constexpr const char* value = loader<TYPE_GUID_V>::name_v; };
+    }
+
+    //
+    // Registering a loader for a resource type
+    //
+    template< type_guid TYPE_GUID_V >
+    struct loader_registration final : details::registration_base
     {
-        guid    m_GUID;                 // This is 64 bits
-        void*   m_Pointer;              // This is 64 bits
+        using loader = loader<TYPE_GUID_V>;
+        using type   = typename loader::data_type;
 
-        constexpr bool isPointer() const { return (m_GUID.m_Value & 1) == 0; }
-    };
-
-    // This structure is able to hold a reference to any kind of xresource
-    // This is also a full reference rather than partial
-    struct universal_ref
-    {
-        partial_ref   m_PRef;
-        type_guid     m_TypeGUID;
-
-        // No copy allowed... 
-                                universal_ref   ()                     = default;
-                                universal_ref   (const universal_ref&) = delete;
-        const universal_ref&    operator =      (const universal_ref&) = delete;
-
-        // moves are ok
-        universal_ref(universal_ref&& A)
+        [[nodiscard]] constexpr void* Load(xresource::mgr& Mgr, const full_guid& GUID) const override
         {
-            m_PRef                  = A.m_PRef;
-            m_TypeGUID              = A.m_TypeGUID;
-            A.m_PRef.m_GUID.m_Value = A.m_TypeGUID.m_Value = 0;
+            return loader::Load(Mgr, GUID);
         }
 
-        universal_ref& operator = (universal_ref&& A)
+        constexpr void Destroy(xresource::mgr& Mgr, void* pData, const full_guid& GUID) const override
         {
-            m_PRef                  = A.m_PRef;
-            m_TypeGUID              = A.m_TypeGUID;
-            A.m_PRef.m_GUID.m_Value = A.m_TypeGUID.m_Value = 0;
-            return *this;
+            loader::Destroy(Mgr, std::move(*static_cast<type*>(pData)), GUID);
         }
 
-        // Destruction can not happen carelessly 
-        ~universal_ref()
+        [[nodiscard]] constexpr const char* getName() const override
         {
-            // No references can die with pointers they must be kill by the user properly 
-            // Since we need to update the ref counts
-            assert(m_PRef.isPointer() == false || m_PRef.m_GUID.m_Value == 0);
-        }
-    };
-
-    // This structure is able to hold a reference to a particular xresource type
-    // The type for T_TYPE_V could be:
-    // xresource::type<texture>, xresource::type<sound>, etc...
-    // This structure is also a full reference rather than partial
-    template < typename T_RESOURCE_TYPE >
-    struct ref
-    {
-        using                           type = T_RESOURCE_TYPE;
-        partial_ref                     m_PRef;
-        static inline constexpr auto&   m_TypeGUID = xresource::type<T_RESOURCE_TYPE>::guid_v;
-
-        // No copy allowed... 
-                                        ref             () = default;
-                                        ref             (const ref&) = delete;
-        const ref&                      operator =      (const ref&) = delete;
-
-        // moves are ok
-        ref(ref&& A)
-        {
-            m_PRef                   = A.m_PRef;
-            A.m_PRef.m_GUID.m_Value  = 0;
+            return details::get_custom_name<TYPE_GUID_V>::value;
         }
 
-        ref& operator = (ref&& A)
+        [[nodiscard]] constexpr type_guid getTypeGuid() const override
         {
-            m_PRef                   = A.m_PRef;
-            A.m_PRef.m_GUID.m_Value  = 0;
-            return *this;
-        }
-
-        // Destruction can not happen carelessly 
-        ~ref()
-        {
-            // No references can die with pointers they must be kill by the user properly 
-            // Since we need to update the ref counts
-            assert( m_PRef.isPointer() == false || m_PRef.m_GUID.m_Value == 0 );
+            return TYPE_GUID_V;
         }
     };
 
@@ -122,21 +95,16 @@ namespace xresource
     {
         struct instance_info
         {
-            void* m_pData{ nullptr };
-            xresource::guid  m_GUID;
-            type_guid       m_TypeGUID;
-            int             m_RefCount{ 1 };
+            void*           m_pData     = { nullptr };
+            full_guid       m_Guid      = {};
+            int             m_RefCount  = { 1 };
         };
 
         struct universal_type
         {
-            using load_fun      = void* ( xresource::mgr& Mgr, guid GUID );
-            using destroy_fun   = void  ( void* pData, xresource::mgr& Mgr, xresource::guid GUID );
-
-            type_guid       m_GUID;
-            load_fun*       m_pLoadFunc;
-            destroy_fun*    m_pDestroyFunc;
-            const char*     m_pName;
+            type_guid                   m_TypeGUID;
+            details::registration_base* m_pRegistration;
+            const char*                 m_pName;
         };
     }
 
@@ -144,223 +112,234 @@ namespace xresource
     struct mgr
     {
         //-------------------------------------------------------------------------
-        mgr()
+        void Initiallize( std::size_t MaxResource = 1000 )
         {
+            m_MaxResources = MaxResource;
+
+            m_InfoBuffer = std::make_unique<details::instance_info[]>(m_MaxResources);
+
             //
             // Initialize our memory manager of instance infos
             //
-            for (int i = 0, end = (int)m_InfoBuffer.size() - 1; i != end; ++i)
+            for (int i = 0, end = (int)m_MaxResources - 1; i != end; ++i)
             {
                 m_InfoBuffer[i].m_pData = &m_InfoBuffer[i + 1];
             }
-            m_InfoBuffer[m_InfoBuffer.size() - 1].m_pData = nullptr;
-            m_pInfoBufferEmptyHead = m_InfoBuffer.data();
-        }
+            m_InfoBuffer[m_MaxResources - 1].m_pData = nullptr;
+            m_pInfoBufferEmptyHead = m_InfoBuffer.get();
 
-        //-------------------------------------------------------------------------
-        template< typename...T_ARGS >
-        void RegisterTypes()
-        {
+
             //
             // Insert all the types into the hash table
             //
-            (   [&]< typename T >(T*)
-                {
-                    m_RegisteredTypes.emplace
-                    ( type<T>::guid_v.m_Value
-                    , details::universal_type
-                        { {type<T>::guid_v}
-                        , [](xresource::mgr& Mgr, guid GUID) constexpr -> void*
-                            { return type<T>::Load(Mgr,GUID); }
-                        , [](void* pData, xresource::mgr& Mgr, guid GUID) constexpr
-                            { type<T>::Destroy(*reinterpret_cast<T*>(pData),Mgr,GUID); }
-                        , get_custom_name<T>::value
-                        }
-                    );
-                }(reinterpret_cast<T_ARGS*>(0))
-                , ...
-            );
+            int TotalTypes = 0;
+            for ( details::registration_base* p = details::registration_base::s_pHead; p ; p = p->m_pNext )
+            {
+                TotalTypes++;
+            }
+
+            m_RegisteredTypes.reserve(TotalTypes);
+
+            for (details::registration_base* p = details::registration_base::s_pHead; p; p = p->m_pNext)
+            {
+                m_RegisteredTypes.emplace( p->getTypeGuid(), details::universal_type{ p->getTypeGuid(), p, p->getName() } );
+            }
         }
 
         //-------------------------------------------------------------------------
-        template< typename T >
-        T* getResource( xresource::ref<T>& R )
-        {
-            // If we already have the xresource return now
-            if (R.m_PRef.isPointer()) return reinterpret_cast<T*>(R.m_PRef.m_Pointer);
 
-            std::uint64_t HashID = R.m_PRef.m_GUID.m_Value ^ R.m_TypeGUID.m_Value;
+        template< auto RSC_TYPE_V >
+        typename loader<RSC_TYPE_V>::data_type* getResource( def_guid<RSC_TYPE_V>& R )
+        {
+            using data_type = typename loader<RSC_TYPE_V>::data_type;
+
+            // If we already have the xresource return now
+            if (R.m_Instance.isPointer()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+
+            std::uint64_t HashID = std::hash<def_guid<RSC_TYPE_V>>{}(R);
             if( auto Entry = m_ResourceInstance.find(HashID); Entry != m_ResourceInstance.end() )
             {
                 auto& E = *Entry->second;
                 E.m_RefCount++;
-                return reinterpret_cast<T*>(R.m_PRef.m_Pointer = E.m_pData);
+                return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer = E.m_pData);
             }
 
-            T* pRSC = type<T>::Load(*this, R.m_PRef.m_GUID);
+            data_type* pRSC = loader<RSC_TYPE_V>::Load(*this, R);
             // If the user return nulls it must mean that it failed to load so we could return a temporary xresource of the right type
             if (pRSC == nullptr) return nullptr;
 
-            FullInstanceInfoAlloc(pRSC, R.m_PRef.m_GUID, R.m_TypeGUID);
+            FullInstanceInfoAlloc(pRSC, R, HashID);
 
-            return reinterpret_cast<T*>(R.m_PRef.m_Pointer = pRSC);
+            return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer = pRSC);
         }
 
         //-------------------------------------------------------------------------
-        void* getResource( universal_ref& URef )
+
+        void* getResource( full_guid& URef )
         {
             // If we already have the xresource return now
-            if (URef.m_PRef.isPointer()) return URef.m_PRef.m_Pointer;
+            if (URef.m_Instance.isPointer()) return URef.m_Instance.m_Pointer;
 
-            std::uint64_t HashID = URef.m_PRef.m_GUID.m_Value ^ URef.m_TypeGUID.m_Value;
+            std::uint64_t HashID = std::hash<full_guid>{}(URef);
             if( auto Entry = m_ResourceInstance.find(HashID); Entry != m_ResourceInstance.end() )
             {
                 auto& E = *Entry->second;
                 E.m_RefCount++;
-                URef.m_PRef.m_Pointer = E.m_pData;
-                return URef.m_PRef.m_Pointer;
+                URef.m_Instance.m_Pointer = E.m_pData;
+                return URef.m_Instance.m_Pointer;
             }
 
-            auto UniversalType = m_RegisteredTypes.find(URef.m_TypeGUID.m_Value);
+            auto UniversalType = m_RegisteredTypes.find(URef.m_Type);
             assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
 
-            void* pRSC = UniversalType->second.m_pLoadFunc(*this, URef.m_PRef.m_GUID );
+            void* pRSC = UniversalType->second.m_pRegistration->Load(*this, URef );
             // If the user return nulls it must mean that it failed to load so we could return a temporary xresource of the right type
             if (pRSC == nullptr) return nullptr;
 
-            FullInstanceInfoAlloc(pRSC, URef.m_PRef.m_GUID, URef.m_TypeGUID);
+            FullInstanceInfoAlloc(pRSC, URef, HashID);
 
-            return URef.m_PRef.m_Pointer = pRSC;
+            return URef.m_Instance.m_Pointer = pRSC;
         }
 
         //-------------------------------------------------------------------------
-        template< typename T >
-        void ReleaseRef(xresource::ref<T>& Ref )
-        {
-            if (false == Ref.m_PRef.isPointer() || Ref.m_PRef.m_GUID.m_Value == 0 ) return;
 
-            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(Ref.m_PRef.m_Pointer));
+        template< auto RSC_TYPE_V >
+        void ReleaseRef(def_guid<RSC_TYPE_V>& Ref )
+        {
+            if (Ref.m_Instance.isValid() == false || false == Ref.m_Instance.isPointer() ) return;
+
+            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(Ref.m_Instance.m_Pointer));
             assert(S != m_ResourceInstanceRelease.end());
 
             auto& R = *S->second;
-            R.m_RefCount--;
-            auto OriginalGuid = R.m_GUID;
-            assert(R.m_TypeGUID == Ref.m_TypeGUID);
-            assert(R.m_pData == Ref.m_PRef.m_Pointer );
+            --R.m_RefCount;
+            auto OriginalGuid = R.m_Guid.m_Instance;
+            assert(R.m_Guid.m_Type == Ref.m_Type);
+            assert(R.m_pData == Ref.m_Instance.m_Pointer );
 
             //
             // If this is the last reference release the xresource
             //
             if( R.m_RefCount == 0 )
             {
-                type<T>::Destroy(*reinterpret_cast<T*>(Ref.m_PRef.m_Pointer), *this, R.m_GUID);
+                loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
                 FullInstanceInfoRelease(R);
             }
 
-            Ref.m_PRef.m_GUID = OriginalGuid;
+            Ref.m_Instance = OriginalGuid;
         }
 
         //-------------------------------------------------------------------------
-        void ReleaseRef( universal_ref& URef )
-        {
-            if( false == URef.m_PRef.isPointer() || URef.m_PRef.m_GUID.m_Value == 0 ) return;
 
-            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_PRef.m_Pointer));
+        void ReleaseRef( full_guid& URef )
+        {
+            if (URef.m_Instance.isValid() == false || false == URef.m_Instance.isPointer()) return;
+
+            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_Instance.m_Pointer));
             assert(S != m_ResourceInstanceRelease.end());
 
             auto& R = *S->second;
             R.m_RefCount--;
-            auto OriginalGuid = R.m_GUID;
-            assert(URef.m_TypeGUID == R.m_TypeGUID);
-            assert(R.m_pData == URef.m_PRef.m_Pointer);
+            auto OriginalGuid = R.m_Guid.m_Instance;
+            assert(URef.m_Type == R.m_Guid.m_Type);
+            assert(R.m_pData == URef.m_Instance.m_Pointer);
 
             //
             // If this is the last reference release the xresource
             //
             if (R.m_RefCount == 0)
             {
-                auto UniversalType = m_RegisteredTypes.find(URef.m_TypeGUID.m_Value);
+                auto UniversalType = m_RegisteredTypes.find(URef.m_Type);
                 assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
 
-                UniversalType->second.m_pDestroyFunc(URef.m_PRef.m_Pointer, *this, R.m_GUID);
+                UniversalType->second.m_pRegistration->Destroy(*this, R.m_pData,  R.m_Guid);
 
                 FullInstanceInfoRelease(R);
             }
 
-            URef.m_PRef.m_GUID = OriginalGuid;
+            URef.m_Instance = OriginalGuid;
         }
 
-        template< typename T >
-        guid getInstanceGuid( const xresource::ref<T>& R ) const
-        {
-            if (false == R.m_PRef.isPointer()) return R.m_PRef.m_GUID;
+        //-------------------------------------------------------------------------
 
-            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(R.m_PRef.m_Pointer));
+        template< auto RSC_TYPE_V >
+        full_guid getFullGuid( const def_guid<RSC_TYPE_V>& R ) const
+        {
+            if (R.isValid() == false || false == R.m_Instance.isPointer()) return R;
+
+            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(R.m_Instance.m_Pointer));
             assert(S != m_ResourceInstanceRelease.end());
 
-            return S->second->m_GUID;
+            return S->second->m_Guid;
         }
+
+        //-------------------------------------------------------------------------
 
         // When serializing resources of displaying them in the editor you may want to show the GUID rather than the pointer
         // When reference holds the pointer rather than the GUID we must find the actual GUID to return to the user
-        guid getInstanceGuid( const universal_ref& URef ) const
+        full_guid getFullGuid( const full_guid& URef ) const
         {
-            if (false == URef.m_PRef.isPointer()) return URef.m_PRef.m_GUID;
+            if (URef.isValid() == false || false == URef.m_Instance.isPointer()) return URef;
 
-            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_PRef.m_Pointer));
+            auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_Instance.m_Pointer));
             assert(S != m_ResourceInstanceRelease.end());
 
-            return S->second->m_GUID;
+            return S->second->m_Guid;
         }
 
-        template< typename T >
-        void CloneRef( ref<T>& Dest, const ref<T>& Ref ) noexcept
+        //-------------------------------------------------------------------------
+
+        template<auto RSC_TYPE_V >
+        void CloneRef( def_guid<RSC_TYPE_V>& Dest, const def_guid<RSC_TYPE_V>& Ref ) noexcept
         {
-            if( Ref.m_PRef.isPointer() )
+            if( Ref.isValid() && Ref.m_Instance.isPointer() )
             {
-                if (Dest.m_PRef.isPointer())
+                if (Dest.isValid() && Dest.m_Instance.isPointer())
                 {
-                    if( Dest.m_PRef.m_Pointer == Ref.m_PRef.m_Pointer ) return;
+                    if( Dest.m_Instance.m_Pointer == Ref.m_Instance.m_Pointer ) return;
                     ReleaseRef(Dest);
                 }
 
-                auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(Ref.m_PRef.m_Pointer));
+                auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(Ref.m_Instance.m_Pointer));
+                assert(S != m_ResourceInstanceRelease.end());
+
+                ++S->second->m_RefCount;
+            }
+            else
+            {
+                if (Dest.isValid() && Dest.m_Instance.isPointer()) ReleaseRef(Dest);
+            }
+            Dest.m_Instance = Ref.m_Instance;
+        }
+
+        //-------------------------------------------------------------------------
+
+        void CloneRef(full_guid& Dest, const full_guid& URef ) noexcept
+        {
+            if(URef.m_Instance.isValid() && URef.m_Instance.isPointer() )
+            {
+                if (Dest.m_Instance.isValid() && Dest.m_Instance.isPointer())
+                {
+                    if (Dest.m_Instance.m_Pointer == URef.m_Instance.m_Pointer) return;
+                    ReleaseRef(Dest);
+                }
+
+                auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_Instance.m_Pointer));
                 assert(S != m_ResourceInstanceRelease.end());
 
                 S->second->m_RefCount++;
             }
             else
             {
-                if (Dest.m_PRef.isPointer()) ReleaseRef(Dest);
+                if (Dest.m_Instance.isValid() && Dest.m_Instance.isPointer()) ReleaseRef(Dest);
             }
-            Dest.m_PRef = Ref.m_PRef;
+
+            Dest = URef;
         }
 
-        void CloneRef(universal_ref& Dest, const universal_ref& URef ) noexcept
-        {
-            if( URef.m_PRef.isPointer() )
-            {
-                if (Dest.m_PRef.isPointer())
-                {
-                    if (Dest.m_PRef.m_Pointer == URef.m_PRef.m_Pointer) return;
-                    ReleaseRef(Dest);
-                }
+        //-------------------------------------------------------------------------
 
-                auto S = m_ResourceInstanceRelease.find(reinterpret_cast<std::uint64_t>(URef.m_PRef.m_Pointer));
-                assert(S != m_ResourceInstanceRelease.end());
-
-                S->second->m_RefCount++;
-            }
-            else
-            {
-                if (Dest.m_PRef.isPointer()) ReleaseRef(Dest);
-            }
-
-            Dest.m_PRef     = URef.m_PRef;
-            Dest.m_TypeGUID = URef.m_TypeGUID;
-        }
-
-        int getResourceCount()
+        int getResourceCount() const noexcept
         {
             assert( m_ResourceInstance.size() == m_ResourceInstanceRelease.size() );
             return static_cast<int>(m_ResourceInstance.size());
@@ -368,7 +347,9 @@ namespace xresource
 
     protected:
 
-        details::instance_info& AllocRscInfo( void )
+        //-------------------------------------------------------------------------
+
+        details::instance_info& AllocRscInfo( void ) noexcept
         {
             auto pTemp = m_pInfoBufferEmptyHead;
             assert(pTemp);
@@ -379,44 +360,50 @@ namespace xresource
             return *pTemp;
         }
 
-        void ReleaseRscInfo(details::instance_info& RscInfo)
+        //-------------------------------------------------------------------------
+
+        void ReleaseRscInfo(details::instance_info& RscInfo) noexcept
         {
             // Add this xresource info to the empty chain
             RscInfo.m_pData = m_pInfoBufferEmptyHead;
             m_pInfoBufferEmptyHead = &RscInfo;
         }
 
-        void FullInstanceInfoAlloc(void* pRsc, xresource::guid RscGUID, xresource::type_guid TypeGUID)
+        //-------------------------------------------------------------------------
+
+        void FullInstanceInfoAlloc(void* pRsc, const full_guid& GUID, std::uint64_t HashID) noexcept
         {
             auto& RscInfo = AllocRscInfo();
 
             RscInfo.m_pData     = pRsc;
-            RscInfo.m_GUID      = RscGUID;
-            RscInfo.m_TypeGUID  = TypeGUID;
+            RscInfo.m_Guid      = GUID;
             RscInfo.m_RefCount  = 1;
 
-            std::uint64_t HashID = RscGUID.m_Value ^ TypeGUID.m_Value;
             m_ResourceInstance.emplace( HashID, &RscInfo );
             m_ResourceInstanceRelease.emplace( reinterpret_cast<std::uint64_t>(pRsc), &RscInfo );
         }
 
-        void FullInstanceInfoRelease( details::instance_info& RscInfo )
+        //-------------------------------------------------------------------------
+
+        void FullInstanceInfoRelease( details::instance_info& RscInfo ) noexcept
         {
             // Release references in the hashs maps
-            m_ResourceInstance.erase(RscInfo.m_GUID.m_Value ^ RscInfo.m_TypeGUID.m_Value);
+            m_ResourceInstance.erase( std::hash<full_guid>{}(RscInfo.m_Guid));
             m_ResourceInstanceRelease.erase( reinterpret_cast<std::uint64_t>(RscInfo.m_pData) );
 
             // Add this xresource info to the empty chain
             ReleaseRscInfo(RscInfo);
         }
 
-        constexpr static auto max_resources_v = 1024;
+        //-------------------------------------------------------------------------
+        //-------------------------------------------------------------------------
 
-        std::unordered_map<std::uint64_t, details::universal_type>  m_RegisteredTypes;
-        std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstance;
-        std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstanceRelease;
-        details::instance_info*                                     m_pInfoBufferEmptyHead{ nullptr };
-        std::array<details::instance_info, max_resources_v>         m_InfoBuffer;
+        std::unordered_map<type_guid, details::universal_type>      m_RegisteredTypes           = {};
+        std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstance          = {};
+        std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstanceRelease   = {};
+        details::instance_info*                                     m_pInfoBufferEmptyHead      = { nullptr };
+        std::unique_ptr<details::instance_info[]>                   m_InfoBuffer                = {};
+        std::size_t                                                 m_MaxResources              = {};
     };
 }
-
+#endif

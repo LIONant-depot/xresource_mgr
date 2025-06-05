@@ -8,19 +8,9 @@ powershell write-host -fore White DOWNLOADING DEPENDENCIES
 powershell write-host -fore White ------------------------------------------------------------------------------------------------------
 
 echo.
-rmdir "../dependencies/xcore" /S /Q
-git clone https://gitlab.com/LIONant/xcore.git "../dependencies/xcore"
+rmdir "../dependencies/xresource" /S /Q
+git clone https://github.com/LIONant-depot/xresource.git "../dependencies/xresource"
 if %ERRORLEVEL% GEQ 1 goto :PAUSE
-
-:COMPILATION
-powershell write-host -fore White ------------------------------------------------------------------------------------------------------
-powershell write-host -fore White COMPILING DEPENDENCIES
-powershell write-host -fore White ------------------------------------------------------------------------------------------------------
-
-cd ../dependencies/xcore/builds
-call UpdateDependencies.bat "return"
-if %ERRORLEVEL% GEQ 1 goto :PAUSE
-cd /d %XECS_PATH%
 
 :DONE
 powershell write-host -fore White ------------------------------------------------------------------------------------------------------

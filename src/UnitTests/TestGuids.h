@@ -1,7 +1,7 @@
 #include <map>
 namespace xresource::unitest::guids
 {
-    static_assert( sizeof(xresource::guid) == 8, "Resource GUIDs for now should be 64bits!");
+    static_assert( sizeof(xresource::instance_guid) == 8, "Resource GUIDs for now should be 64bits!");
 
     namespace details
     {
@@ -20,7 +20,7 @@ namespace xresource::unitest::guids
             
             for (int i = 0; i < max_iterations_v; i++)
             {
-                auto GUID = xresource::CreateUniqueGuid();
+                auto GUID = xresource::guid_generator::Instance64();
                 auto GU64 = *reinterpret_cast<std::uint64_t*>(&GUID);
                 
                 if( auto f = m_ListOfGeneratedGuids.find(GU64); f != m_ListOfGeneratedGuids.end() )
@@ -41,7 +41,7 @@ namespace xresource::unitest::guids
             printf("    TestFirstBit... ");
             for (int i = 0; i < max_iterations_v; i++)
             {
-                auto GUID = xresource::CreateUniqueGuid();
+                auto GUID = xresource::guid_generator::Instance64();
                 auto GU64 = *reinterpret_cast<std::uint64_t*>(&GUID);
 
                 if( (GU64&1) == 0 )
@@ -62,7 +62,8 @@ namespace xresource::unitest::guids
 
             std::map<std::uint64_t, int>  m_ListOfGeneratedGuids;
 
-            m_ListOfGeneratedGuids.emplace(xresource::type_guid("Int").m_Value,   0);
+
+            m_ListOfGeneratedGuids.emplace(xresource::guid_generator::Type64FromString("Int"),   0);
             m_ListOfGeneratedGuids.emplace(xresource::type_guid("int").m_Value,   1);
             m_ListOfGeneratedGuids.emplace(xresource::type_guid("a").m_Value,     2);
             m_ListOfGeneratedGuids.emplace(xresource::type_guid("asd").m_Value,   3);
@@ -99,12 +100,12 @@ namespace xresource::unitest::guids
     float Evaluate()
     {
         printf("\n\nEvaluating Resource GUIDs...\n");
-        xcore::vector2 Grade( 0,0 );
-        Grade += xcore::vector2( details::TestUniqueness(), 1 );
-        Grade += xcore::vector2( details::TestFirstBit(),   1 );
-        Grade += xcore::vector2( details::TestTypeGuids(),  1 );
+        float Grade = 0;
+        Grade += details::TestUniqueness();
+        Grade += details::TestFirstBit();
+        Grade += details::TestTypeGuids();
 
-        float Total = Grade.m_X / Grade.m_Y;
+        float Total = Grade / 3;
         printf("Section Score: %3.0f%%", Total * 100);
         return Total;
     }
