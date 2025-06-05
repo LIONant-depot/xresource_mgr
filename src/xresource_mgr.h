@@ -5,9 +5,6 @@
 #include <unordered_map>
 #include "xresource/source/xresource_guid.h"
 
-// Define this macro if you want to speed up the getResource/destroyResource by forcing the system to depend on been aware of the loader type
-//#define XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
-
 //----------------------------------------------------------------------------------
 // Example on registering a resource type
 //----------------------------------------------------------------------------------
@@ -167,21 +164,8 @@ namespace xresource
                 return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer = E.m_pData);
             }
 
-            data_type* pRSC;
-            #ifdef XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
-            {
-                pRSC = loader<RSC_TYPE_V>::Load(*this, R);
-            }
-            #else
-            {
-                auto UniversalType = m_RegisteredTypes.find(R.m_Type);
-                assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
-
-                pRSC = UniversalType->second.m_pRegistration->Load(*this, R);
-            }
-            #endif
-
             // If the user return nulls it must mean that it failed to load so we could return a temporary xresource of the right type
+            data_type* pRSC = loader<RSC_TYPE_V>::Load(*this, R);
             if (pRSC == nullptr) return nullptr;
 
             FullInstanceInfoAlloc(pRSC, R, HashID);
@@ -208,8 +192,8 @@ namespace xresource
             auto UniversalType = m_RegisteredTypes.find(URef.m_Type);
             assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
 
-            void* pRSC = UniversalType->second.m_pRegistration->Load(*this, URef );
             // If the user return nulls it must mean that it failed to load so we could return a temporary xresource of the right type
+            void* pRSC = UniversalType->second.m_pRegistration->Load(*this, URef);
             if (pRSC == nullptr) return nullptr;
 
             FullInstanceInfoAlloc(pRSC, URef, HashID);
@@ -238,18 +222,7 @@ namespace xresource
             //
             if( R.m_RefCount == 0 )
             {
-                #ifdef XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
-                {
-                    loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
-                }
-                #else
-                {
-                    auto UniversalType = m_RegisteredTypes.find(Ref.m_Type);
-                    assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
-
-                    UniversalType->second.m_pRegistration->Destroy(*this, R.m_pData, R.m_Guid);
-                }
-                #endif
+                loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
                 FullInstanceInfoRelease(R);
             }
 
