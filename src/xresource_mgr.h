@@ -5,6 +5,9 @@
 #include <unordered_map>
 #include "xresource/source/xresource_guid.h"
 
+// Define this macro if you want to speed up the getResource/destroyResource by forcing the system to depend on been aware of the loader type
+//#define XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
+
 //----------------------------------------------------------------------------------
 // Example on registering a resource type
 //----------------------------------------------------------------------------------
@@ -25,7 +28,6 @@
 // The implementation of the above functions should be done in a cpp file
 // This will minimize dependencies and help keep the code clean
 //----------------------------------------------------------------------------------
-
 namespace xresource
 {
     struct mgr;
@@ -112,7 +114,8 @@ namespace xresource
     struct mgr
     {
         //-------------------------------------------------------------------------
-        void Initiallize( std::size_t MaxResource = 1000 )
+
+        void Initiallize( std::size_t MaxResource = 1000 ) noexcept
         {
             m_MaxResources = MaxResource;
 
@@ -149,7 +152,7 @@ namespace xresource
         //-------------------------------------------------------------------------
 
         template< auto RSC_TYPE_V >
-        typename loader<RSC_TYPE_V>::data_type* getResource( def_guid<RSC_TYPE_V>& R )
+        typename loader<RSC_TYPE_V>::data_type* getResource( def_guid<RSC_TYPE_V>& R ) noexcept
         {
             using data_type = typename loader<RSC_TYPE_V>::data_type;
 
@@ -164,7 +167,20 @@ namespace xresource
                 return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer = E.m_pData);
             }
 
-            data_type* pRSC = loader<RSC_TYPE_V>::Load(*this, R);
+            data_type* pRSC;
+            #ifdef XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
+            {
+                pRSC = loader<RSC_TYPE_V>::Load(*this, R);
+            }
+            #else
+            {
+                auto UniversalType = m_RegisteredTypes.find(R.m_Type);
+                assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
+
+                pRSC = UniversalType->second.m_pRegistration->Load(*this, R);
+            }
+            #endif
+
             // If the user return nulls it must mean that it failed to load so we could return a temporary xresource of the right type
             if (pRSC == nullptr) return nullptr;
 
@@ -175,7 +191,7 @@ namespace xresource
 
         //-------------------------------------------------------------------------
 
-        void* getResource( full_guid& URef )
+        void* getResource( full_guid& URef ) noexcept
         {
             // If we already have the xresource return now
             if (URef.m_Instance.isPointer()) return URef.m_Instance.m_Pointer;
@@ -204,7 +220,7 @@ namespace xresource
         //-------------------------------------------------------------------------
 
         template< auto RSC_TYPE_V >
-        void ReleaseRef(def_guid<RSC_TYPE_V>& Ref )
+        void ReleaseRef(def_guid<RSC_TYPE_V>& Ref ) noexcept
         {
             if (Ref.m_Instance.isValid() == false || false == Ref.m_Instance.isPointer() ) return;
 
@@ -222,7 +238,18 @@ namespace xresource
             //
             if( R.m_RefCount == 0 )
             {
-                loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
+                #ifdef XRESOURCE_MGR_USE_LOADER_TYPE_DIRECTLY
+                {
+                    loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
+                }
+                #else
+                {
+                    auto UniversalType = m_RegisteredTypes.find(Ref.m_Type);
+                    assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
+
+                    UniversalType->second.m_pRegistration->Destroy(*this, R.m_pData, R.m_Guid);
+                }
+                #endif
                 FullInstanceInfoRelease(R);
             }
 
@@ -231,7 +258,7 @@ namespace xresource
 
         //-------------------------------------------------------------------------
 
-        void ReleaseRef( full_guid& URef )
+        void ReleaseRef( full_guid& URef ) noexcept
         {
             if (URef.m_Instance.isValid() == false || false == URef.m_Instance.isPointer()) return;
 
@@ -263,7 +290,7 @@ namespace xresource
         //-------------------------------------------------------------------------
 
         template< auto RSC_TYPE_V >
-        full_guid getFullGuid( const def_guid<RSC_TYPE_V>& R ) const
+        full_guid getFullGuid( const def_guid<RSC_TYPE_V>& R ) const noexcept
         {
             if (R.isValid() == false || false == R.m_Instance.isPointer()) return R;
 
@@ -277,7 +304,7 @@ namespace xresource
 
         // When serializing resources of displaying them in the editor you may want to show the GUID rather than the pointer
         // When reference holds the pointer rather than the GUID we must find the actual GUID to return to the user
-        full_guid getFullGuid( const full_guid& URef ) const
+        full_guid getFullGuid( const full_guid& URef ) const noexcept
         {
             if (URef.isValid() == false || false == URef.m_Instance.isPointer()) return URef;
 
