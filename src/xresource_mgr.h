@@ -8,13 +8,13 @@
 //----------------------------------------------------------------------------------
 // Example on registering a resource type
 //----------------------------------------------------------------------------------
-// using texture_guid = xresource::guid_def<xresource::type_guid("texture")>;  // First we define the GUID
+// using texture_guid = xresource::def_guid<xresource::type_guid("texture")>;  // First we define the GUID
 //
 // template<>
 // struct xresource::loader< texture_guid.m_Type >                  // Now we specify the loader and we must fill in all the information
 // {
 //      //--- Expected static parameters ---
-//      constexpr static inline auto         name_v      = "Custom Resource Name";      // **** This is optional *****
+//      constexpr static inline auto         type_name_v = "Texture";                   // Name of the type used in the resource path
 //      using                                data_type   = xgpu::texture;               // This is the actual data type of the runtime resource itself...
 //      static data_type*                    Load   ( xresource::mgr& Mgr,                    const full_guid& GUID );
 //      static void                          Destroy( xresource::mgr& Mgr, data_type&& Data,  const full_guid& GUID );
@@ -42,19 +42,19 @@ namespace xresource
             {
                 s_pHead = this;
             }
-                                                            registration_base   ( registration_base&& )                                             = delete;
-                                                            registration_base   ( const registration_base& )                                        = delete;
-                            constexpr virtual              ~registration_base   ( void )                                                            = default;
-                            const registration_base&        operator =          ( const registration_base& )                                        = delete;
-                            const registration_base&        operator =          ( registration_base&& )                                             = delete;
-            [[nodiscard]]   constexpr virtual void*         Load                ( xresource::mgr& Mgr,              const full_guid& GUID ) const   = 0;
-                            constexpr virtual void          Destroy             ( xresource::mgr& Mgr, void* pData, const full_guid& GUID ) const   = 0;
-            [[nodiscard]]   constexpr virtual const char*   getName             ( void )                                                    const   = 0;
-            [[nodiscard]]   constexpr virtual type_guid     getTypeGuid         ( void )                                                    const   = 0;
+                                                                      registration_base   ( registration_base&& )                                             = delete;
+                                                                      registration_base   ( const registration_base& )                                        = delete;
+                            constexpr virtual                        ~registration_base   ( void )                                                            = default;
+                                      const registration_base&        operator =          ( const registration_base& )                                        = delete;
+                                      const registration_base&        operator =          ( registration_base&& )                                             = delete;
+            [[nodiscard]]   constexpr virtual void*                   Load                ( xresource::mgr& Mgr,              const full_guid& GUID ) const   = 0;
+                            constexpr virtual void                    Destroy             ( xresource::mgr& Mgr, void* pData, const full_guid& GUID ) const   = 0;
+            [[nodiscard]]   constexpr virtual std::wstring_view       getTypeName         ( void )                                                    const   = 0;
+            [[nodiscard]]   constexpr virtual type_guid               getTypeGuid         ( void )                                                    const   = 0;
         };
 
-        template< type_guid TYPE_GUID_V, typename = void > struct get_custom_name                                                                     { static inline           const char* value = []{return typeid(loader<TYPE_GUID_V>::data_type).name(); }(); };
-        template< type_guid TYPE_GUID_V >                  struct get_custom_name< TYPE_GUID_V, std::void_t< typename loader<TYPE_GUID_V>::name_v > > { static inline constexpr const char* value = loader<TYPE_GUID_V>::name_v; };
+        //template< type_guid TYPE_GUID_V, typename = void > struct get_custom_name                                                                     { static inline           const char* value = []{return typeid(loader<TYPE_GUID_V>::data_type).name(); }(); };
+        //template< type_guid TYPE_GUID_V >                  struct get_custom_name< TYPE_GUID_V, std::void_t< typename loader<TYPE_GUID_V>::name_v > > { static inline constexpr const char* value = loader<TYPE_GUID_V>::name_v; };
     }
 
     //
@@ -76,9 +76,9 @@ namespace xresource
             loader::Destroy(Mgr, std::move(*static_cast<type*>(pData)), GUID);
         }
 
-        [[nodiscard]] constexpr const char* getName() const override
+        [[nodiscard]] constexpr std::wstring_view getTypeName() const override
         {
-            return details::get_custom_name<TYPE_GUID_V>::value;
+            return loader::type_name_v;
         }
 
         [[nodiscard]] constexpr type_guid getTypeGuid() const override
@@ -103,13 +103,22 @@ namespace xresource
         {
             type_guid                   m_TypeGUID;
             details::registration_base* m_pRegistration;
-            const char*                 m_pName;
+            std::wstring_view           m_TypeName;
         };
     }
 
     // Resource Manager
     struct mgr
     {
+        ~mgr()
+        {
+            // If the user have give us ownership of the user data we must free it
+            if ( m_bOwnsUserData && m_pUserData )
+            {
+                delete m_pUserData;
+            }
+        }
+
         //-------------------------------------------------------------------------
 
         void Initiallize( std::size_t MaxResource = 1000 ) noexcept
@@ -142,8 +151,41 @@ namespace xresource
 
             for (details::registration_base* p = details::registration_base::s_pHead; p; p = p->m_pNext)
             {
-                m_RegisteredTypes.emplace( p->getTypeGuid(), details::universal_type{ p->getTypeGuid(), p, p->getName() } );
+                m_RegisteredTypes.emplace( p->getTypeGuid(), details::universal_type{ p->getTypeGuid(), p, p->getTypeName() } );
             }
+        }
+
+        //-------------------------------------------------------------------------
+
+        void setUserData( void* pUserData, bool bOwnsUserData ) noexcept
+        {
+            m_pUserData     = pUserData;
+            m_bOwnsUserData = bOwnsUserData;
+        }
+
+        //-------------------------------------------------------------------------
+
+        template< typename T >
+        T& getUserData( void ) noexcept
+        {
+            return *static_cast<T*>(m_pUserData);
+        }
+
+        //-------------------------------------------------------------------------
+        template<auto RSC_TYPE_V>
+        typename loader<RSC_TYPE_V>::data_type* RegisterResource(def_guid<RSC_TYPE_V>& Guid, loader<RSC_TYPE_V>::data_type* pRSC)
+        {
+            using data_type = typename loader<RSC_TYPE_V>::data_type;
+
+            assert(Guid.m_Instance.isValid() && Guid.m_Instance.isPointer() == false);
+            assert(pRSC);
+
+            std::uint64_t HashID = std::hash<def_guid<RSC_TYPE_V>>{}(Guid);
+            assert(m_ResourceInstance.find(HashID) == m_ResourceInstance.end());
+
+            FullInstanceInfoAlloc(pRSC, Guid, HashID);
+
+            return reinterpret_cast<data_type*>(Guid.m_Instance.m_Pointer = pRSC);
         }
 
         //-------------------------------------------------------------------------
@@ -154,7 +196,7 @@ namespace xresource
             using data_type = typename loader<RSC_TYPE_V>::data_type;
 
             // If we already have the xresource return now
-            if (R.m_Instance.isPointer()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+            if (R.isValid() == false || R.m_Instance.isPointer()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
 
             std::uint64_t HashID = std::hash<def_guid<RSC_TYPE_V>>{}(R);
             if( auto Entry = m_ResourceInstance.find(HashID); Entry != m_ResourceInstance.end() )
@@ -345,6 +387,45 @@ namespace xresource
             return static_cast<int>(m_ResourceInstance.size());
         }
 
+        //-------------------------------------------------------------------------
+
+        void setRootPath( std::wstring&& Path ) noexcept
+        {
+            m_RootPath = std::move(Path);
+        }
+
+        //-------------------------------------------------------------------------
+
+        const std::wstring_view getRootPath( void ) const noexcept
+        {
+            return m_RootPath;
+        }
+
+        //-------------------------------------------------------------------------
+
+        std::wstring getResourcePath( const xresource::full_guid& Guid, const std::wstring_view TypeName ) noexcept
+        {
+            // Make sure we get a valid guid
+            assert(Guid.isValid() && Guid.m_Instance.isPointer() == false);
+
+            return std::format(L"{}\\{}\\{:02X}\\{:02X}\\{:X}", m_RootPath, TypeName, (Guid.m_Instance.m_Value >> 0) & 0xff, (Guid.m_Instance.m_Value >> 8) & 0xff, Guid.m_Instance.m_Value);
+        }
+
+        //-------------------------------------------------------------------------
+
+        std::wstring getResourcePath(const xresource::full_guid& Guid ) noexcept
+        {
+            assert(Guid.isValid() && Guid.m_Instance.isPointer()==false);
+
+            auto UniversalType = m_RegisteredTypes.find(Guid.m_Type);
+
+            // Type was not registered
+            assert(UniversalType != m_RegisteredTypes.end());
+
+            // get the final path
+            return getResourcePath( Guid, UniversalType->second.m_TypeName );
+        }
+
     protected:
 
         //-------------------------------------------------------------------------
@@ -404,6 +485,9 @@ namespace xresource
         details::instance_info*                                     m_pInfoBufferEmptyHead      = { nullptr };
         std::unique_ptr<details::instance_info[]>                   m_InfoBuffer                = {};
         std::size_t                                                 m_MaxResources              = {};
+        std::wstring                                                m_RootPath                  = {};
+        void*                                                       m_pUserData                 = {};
+        bool                                                        m_bOwnsUserData             = {false};
     };
 }
 #endif
