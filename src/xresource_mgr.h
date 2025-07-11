@@ -14,10 +14,12 @@
 // struct xresource::loader< texture_guid.m_Type >                  // Now we specify the loader and we must fill in all the information
 // {
 //      //--- Expected static parameters ---
-//      constexpr static inline auto         type_name_v = "Texture";                   // Name of the type used in the resource path
-//      using                                data_type   = xgpu::texture;               // This is the actual data type of the runtime resource itself...
+//      constexpr static inline auto         type_name_v        = "Texture";            // Name of the type used in the resource path
+//      constexpr static inline auto         use_death_march_v  = true;                 // Will wait at least 1 frame before releasing the resource
+//      using                                data_type          = xgpu::texture         // This is the actual data type of the runtime resource itself...
+//
 //      static data_type*                    Load   ( xresource::mgr& Mgr,                    const full_guid& GUID );
-//      static void                          Destroy( xresource::mgr& Mgr, data_type&& Data,  const full_guid& GUID );
+//      static void                          Destroy( xresource::mgr& Mgr, data_type& Data,   const full_guid& GUID );
 // };
 // After you have define the loader type you need to register it, like this...
 // inline static xresource::loader_registration<texture_guid.m_Type> UniqueName;
@@ -42,15 +44,16 @@ namespace xresource
             {
                 s_pHead = this;
             }
-                                                                      registration_base   ( registration_base&& )                                             = delete;
-                                                                      registration_base   ( const registration_base& )                                        = delete;
-                            constexpr virtual                        ~registration_base   ( void )                                                            = default;
-                                      const registration_base&        operator =          ( const registration_base& )                                        = delete;
-                                      const registration_base&        operator =          ( registration_base&& )                                             = delete;
-            [[nodiscard]]   constexpr virtual void*                   Load                ( xresource::mgr& Mgr,              const full_guid& GUID ) const   = 0;
-                            constexpr virtual void                    Destroy             ( xresource::mgr& Mgr, void* pData, const full_guid& GUID ) const   = 0;
-            [[nodiscard]]   constexpr virtual std::wstring_view       getTypeName         ( void )                                                    const   = 0;
-            [[nodiscard]]   constexpr virtual type_guid               getTypeGuid         ( void )                                                    const   = 0;
+                                                                      registration_base   ( registration_base&& )                                               = delete;
+                                                                      registration_base   ( const registration_base& )                                          = delete;
+                            constexpr virtual                        ~registration_base   ( void )                                                              = default;
+                                      const registration_base&        operator =          ( const registration_base& )                                          = delete;
+                                      const registration_base&        operator =          ( registration_base&& )                                               = delete;
+            [[nodiscard]]   constexpr virtual void*                   Load                ( xresource::mgr& Mgr,              const full_guid& GUID ) const     = 0;
+                            constexpr virtual void                    Destroy             ( xresource::mgr& Mgr, void* pData, const full_guid& GUID ) const     = 0;
+            [[nodiscard]]   constexpr virtual std::wstring_view       getTypeName         ( void )                                                    const     = 0;
+            [[nodiscard]]   constexpr virtual type_guid               getTypeGuid         ( void )                                                    const     = 0;
+            [[nodiscard]]   constexpr virtual bool                    hasDeathmarchOn     ( void )                                                    const     = 0;
         };
 
         //template< type_guid TYPE_GUID_V, typename = void > struct get_custom_name                                                                     { static inline           const char* value = []{return typeid(loader<TYPE_GUID_V>::data_type).name(); }(); };
@@ -73,7 +76,7 @@ namespace xresource
 
         constexpr void Destroy(xresource::mgr& Mgr, void* pData, const full_guid& GUID) const override
         {
-            loader::Destroy(Mgr, std::move(*static_cast<type*>(pData)), GUID);
+            loader::Destroy(Mgr, *static_cast<type*>(pData), GUID);
         }
 
         [[nodiscard]] constexpr std::wstring_view getTypeName() const override
@@ -85,6 +88,12 @@ namespace xresource
         {
             return TYPE_GUID_V;
         }
+
+        [[nodiscard]] constexpr bool hasDeathmarchOn() const override
+        {
+            return loader::use_death_march_v;
+        }
+
     };
 
     //
@@ -94,9 +103,9 @@ namespace xresource
     {
         struct instance_info
         {
-            void*           m_pData     = { nullptr };
-            full_guid       m_Guid      = {};
-            int             m_RefCount  = { 1 };
+            void*                       m_pData     = { nullptr };
+            full_guid                   m_Guid      = {};
+            int                         m_RefCount  = { 1 };
         };
 
         struct universal_type
@@ -104,6 +113,7 @@ namespace xresource
             type_guid                   m_TypeGUID;
             details::registration_base* m_pRegistration;
             std::wstring_view           m_TypeName;
+            bool                        m_bUseDeathMarch;
         };
     }
 
@@ -151,7 +161,7 @@ namespace xresource
 
             for (details::registration_base* p = details::registration_base::s_pHead; p; p = p->m_pNext)
             {
-                m_RegisteredTypes.emplace( p->getTypeGuid(), details::universal_type{ p->getTypeGuid(), p, p->getTypeName() } );
+                m_RegisteredTypes.emplace( p->getTypeGuid(), details::universal_type{ p->getTypeGuid(), p, p->getTypeName(), p->hasDeathmarchOn() } );
             }
         }
 
@@ -264,7 +274,15 @@ namespace xresource
             //
             if( R.m_RefCount == 0 )
             {
-                loader<RSC_TYPE_V>::Destroy(*this, std::move(*reinterpret_cast<typename loader<RSC_TYPE_V>::data_type*>(Ref.m_Instance.m_Pointer)), R.m_Guid);
+                if (loader<RSC_TYPE_V>::use_death_march_v)
+                {
+                    auto& DestructionList = m_DeathMarchList[m_CurrentFrame % m_DeathMarchList.size()];
+                    DestructionList.emplace_back(R.m_pData, R.m_Guid);
+                }
+                else
+                {
+                    loader<RSC_TYPE_V>::Destroy( *this, *static_cast<loader<RSC_TYPE_V>::data_type*>(R.m_pData), R.m_Guid );
+                }
                 FullInstanceInfoRelease(R);
             }
 
@@ -294,8 +312,15 @@ namespace xresource
                 auto UniversalType = m_RegisteredTypes.find(URef.m_Type);
                 assert(UniversalType != m_RegisteredTypes.end()); // Type was not registered
 
-                UniversalType->second.m_pRegistration->Destroy(*this, R.m_pData,  R.m_Guid);
-
+                if( UniversalType->second.m_bUseDeathMarch )
+                {
+                    auto& DestructionList = m_DeathMarchList[m_CurrentFrame % m_DeathMarchList.size()];
+                    DestructionList.emplace_back(R.m_pData, R.m_Guid);
+                }
+                else
+                {
+                    UniversalType->second.m_pRegistration->Destroy(*this, R.m_pData, R.m_Guid);
+                }
                 FullInstanceInfoRelease(R);
             }
 
@@ -426,6 +451,23 @@ namespace xresource
             return getResourcePath( Guid, UniversalType->second.m_TypeName );
         }
 
+        //-------------------------------------------------------------------------
+
+        void OnEndFrameEvent()
+        {
+            m_CurrentFrame++;
+            auto& DeathMarch = m_DeathMarchList[m_CurrentFrame % m_DeathMarchList.size()];
+            for (auto& E : DeathMarch)
+            {
+                auto It = m_RegisteredTypes.find(E.m_FullGuid.m_Type);
+                if (It != m_RegisteredTypes.end())
+                {
+                    It->second.m_pRegistration->Destroy(*this, E.m_pData, E.m_FullGuid);
+                }
+            }
+            DeathMarch.clear();
+        }
+
     protected:
 
         //-------------------------------------------------------------------------
@@ -476,6 +518,12 @@ namespace xresource
             ReleaseRscInfo(RscInfo);
         }
 
+        struct death_march_entry
+        {
+            void*                   m_pData;
+            xresource::full_guid    m_FullGuid;
+        };
+
         //-------------------------------------------------------------------------
         //-------------------------------------------------------------------------
 
@@ -486,6 +534,8 @@ namespace xresource
         std::unique_ptr<details::instance_info[]>                   m_InfoBuffer                = {};
         std::size_t                                                 m_MaxResources              = {};
         std::wstring                                                m_RootPath                  = {};
+        std::array<std::vector<death_march_entry>,2>                m_DeathMarchList            = {};
+        int                                                         m_CurrentFrame              = 0;
         void*                                                       m_pUserData                 = {};
         bool                                                        m_bOwnsUserData             = {false};
     };
