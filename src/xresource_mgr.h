@@ -453,7 +453,7 @@ namespace xresource
 
         //-------------------------------------------------------------------------
 
-        void OnEndFrameEvent()
+        void OnEndFrameDelegate()
         {
             m_CurrentFrame++;
             auto& DeathMarch = m_DeathMarchList[m_CurrentFrame % m_DeathMarchList.size()];
