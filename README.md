@@ -4,14 +4,13 @@
 
 ## Key Features
 
-- **Type-Safe Resource Management**: Uses templated GUIDs to ensure compile-time type safety for resources.
-- **Reference Counting**: Automatically tracks resource usage with reference counting for efficient memory management.
-- **Death March Support**: Optional delayed resource deletion to prevent frame-bound issues in real-time applications.
-- **Customizable Loaders**: Define custom resource loaders for different types, with minimal dependencies via header-only declarations.
-- **Dynamic Resource Paths**: Constructs resource paths based on GUIDs and type names for organized asset storage.
-- **Modern C++20**: Utilizes modern C++ features for clean, maintainable code.
-- **No External Dependencies**: Relies only on the C++ Standard Library and `xresource_guid`.
-- **MIT License**: Free and open for all use cases.
+* **Rock-Solid Type Safety**: Templated GUIDs lock in resource types at compile time—no slip-ups! 
+* **Smart Reference Counting**: Auto-tracks resource use for zero-waste memory management. 
+* **Death March Magic**: Optional delayed cleanup keeps real-time apps silky smooth. 
+* **Flexible Loaders**: Craft custom resource loaders with lean, header-only code. 
+* **Slick Resource Paths**: Auto-builds organized asset paths from GUIDs and type names. 
+* **Cutting-Edge C++20**: Modern, clean code that’s a joy to work with. 
+* **MIT License**: Totally free and open—build whatever, whenever! 
 
 ## Dependencies
 
