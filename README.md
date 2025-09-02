@@ -25,7 +25,7 @@ Below is an example demonstrating how to define and use a texture resource with 
 
 // Define a texture resource type
 namespace xrsc {
-    inline static constexpr auto texture_type_guid_v = xresource::type_guid(xresource::guid_generator::Instance64FromString("texture"));
+    inline static constexpr auto texture_type_guid_v = xresource::type_guid("texture");
     using texture = xresource::def_guid<texture_type_guid_v>;
 }
 
