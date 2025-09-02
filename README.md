@@ -56,7 +56,7 @@ int main() {
     mgr.Initiallize();
 
     xrsc::texture tex;
-    tex.m_Instance = xresource::instance_guid::GenerateGUID();
+    tex.m_Instance = xresource::instance_guid::GenerateGUIDCopy();
 
     // Load resource
     auto* texture = mgr.getResource(tex);
