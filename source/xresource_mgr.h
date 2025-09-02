@@ -2,8 +2,10 @@
 #define XRESOURCE_MGR_H
 #pragma once
 
+#include <cassert>
 #include <unordered_map>
-#include "xresource/source/xresource_guid.h"
+#include <array>
+#include "dependencies/xresource_guid/source/xresource_guid.h"
 
 //----------------------------------------------------------------------------------
 // Example on registering a resource type
@@ -76,7 +78,7 @@ namespace xresource
 
         constexpr void Destroy(xresource::mgr& Mgr, void* pData, const full_guid& GUID) const override
         {
-            loader::Destroy(Mgr, *static_cast<type*>(pData), GUID);
+            loader::Destroy(Mgr, std::move(*static_cast<type*>(pData)), GUID);
         }
 
         [[nodiscard]] constexpr std::wstring_view getTypeName() const override
@@ -281,7 +283,7 @@ namespace xresource
                 }
                 else
                 {
-                    loader<RSC_TYPE_V>::Destroy( *this, *static_cast<loader<RSC_TYPE_V>::data_type*>(R.m_pData), R.m_Guid );
+                    loader<RSC_TYPE_V>::Destroy( *this, std::move(*static_cast<typename loader<RSC_TYPE_V>::data_type*>(R.m_pData)), R.m_Guid );
                 }
                 FullInstanceInfoRelease(R);
             }
