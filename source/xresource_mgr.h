@@ -192,10 +192,9 @@ namespace xresource
             assert(Guid.m_Instance.isValid() && Guid.m_Instance.isPointer() == false);
             assert(pRSC);
 
-            std::uint64_t HashID = std::hash<def_guid<RSC_TYPE_V>>{}(Guid);
-            assert(m_ResourceInstance.find(HashID) == m_ResourceInstance.end());
+            assert(m_ResourceInstance.find(Guid) == m_ResourceInstance.end());
 
-            FullInstanceInfoAlloc(pRSC, Guid, HashID);
+            FullInstanceInfoAlloc(pRSC, Guid);
 
             return reinterpret_cast<data_type*>(Guid.m_Instance.m_Pointer = pRSC);
         }
@@ -210,8 +209,7 @@ namespace xresource
             // If we already have the xresource return now
             if (R.isValid() == false || R.m_Instance.isPointer()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
 
-            std::uint64_t HashID = std::hash<def_guid<RSC_TYPE_V>>{}(R);
-            if( auto Entry = m_ResourceInstance.find(HashID); Entry != m_ResourceInstance.end() )
+            if( auto Entry = m_ResourceInstance.find(R); Entry != m_ResourceInstance.end() )
             {
                 auto& E = *Entry->second;
                 E.m_RefCount++;
@@ -222,7 +220,7 @@ namespace xresource
             data_type* pRSC = loader<RSC_TYPE_V>::Load(*this, R);
             if (pRSC == nullptr) return nullptr;
 
-            FullInstanceInfoAlloc(pRSC, R, HashID);
+            FullInstanceInfoAlloc(pRSC, R);
 
             return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer = pRSC);
         }
@@ -234,8 +232,7 @@ namespace xresource
             // If we already have the xresource return now
             if (URef.m_Instance.isPointer()) return URef.m_Instance.m_Pointer;
 
-            std::uint64_t HashID = std::hash<full_guid>{}(URef);
-            if( auto Entry = m_ResourceInstance.find(HashID); Entry != m_ResourceInstance.end() )
+            if( auto Entry = m_ResourceInstance.find(URef); Entry != m_ResourceInstance.end() )
             {
                 auto& E = *Entry->second;
                 E.m_RefCount++;
@@ -250,7 +247,7 @@ namespace xresource
             void* pRSC = UniversalType->second.m_pRegistration->Load(*this, URef);
             if (pRSC == nullptr) return nullptr;
 
-            FullInstanceInfoAlloc(pRSC, URef, HashID);
+            FullInstanceInfoAlloc(pRSC, URef);
 
             return URef.m_Instance.m_Pointer = pRSC;
         }
@@ -496,7 +493,7 @@ namespace xresource
 
         //-------------------------------------------------------------------------
 
-        void FullInstanceInfoAlloc(void* pRsc, const full_guid& GUID, std::uint64_t HashID) noexcept
+        void FullInstanceInfoAlloc(void* pRsc, const full_guid& GUID) noexcept
         {
             auto& RscInfo = AllocRscInfo();
 
@@ -504,7 +501,7 @@ namespace xresource
             RscInfo.m_Guid      = GUID;
             RscInfo.m_RefCount  = 1;
 
-            m_ResourceInstance.emplace( HashID, &RscInfo );
+            m_ResourceInstance.emplace(GUID, &RscInfo );
             m_ResourceInstanceRelease.emplace( reinterpret_cast<std::uint64_t>(pRsc), &RscInfo );
         }
 
@@ -513,7 +510,7 @@ namespace xresource
         void FullInstanceInfoRelease( details::instance_info& RscInfo ) noexcept
         {
             // Release references in the hashs maps
-            m_ResourceInstance.erase( std::hash<full_guid>{}(RscInfo.m_Guid));
+            m_ResourceInstance.erase( RscInfo.m_Guid );
             m_ResourceInstanceRelease.erase( reinterpret_cast<std::uint64_t>(RscInfo.m_pData) );
 
             // Add this xresource info to the empty chain
@@ -530,7 +527,7 @@ namespace xresource
         //-------------------------------------------------------------------------
 
         std::unordered_map<type_guid, details::universal_type>      m_RegisteredTypes           = {};
-        std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstance          = {};
+        std::unordered_map<full_guid, details::instance_info*>      m_ResourceInstance          = {};
         std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstanceRelease   = {};
         details::instance_info*                                     m_pInfoBufferEmptyHead      = { nullptr };
         std::unique_ptr<details::instance_info[]>                   m_InfoBuffer                = {};
