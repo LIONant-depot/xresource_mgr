@@ -95,7 +95,6 @@ namespace xresource
         {
             return loader::use_death_march_v;
         }
-
     };
 
     //
@@ -538,5 +537,10 @@ namespace xresource
         void*                                                       m_pUserData                 = {};
         bool                                                        m_bOwnsUserData             = {false};
     };
+
+    //
+    // Create the global instance
+    //
+    inline mgr g_Mgr = {};
 }
 #endif
