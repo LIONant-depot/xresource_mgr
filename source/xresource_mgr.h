@@ -198,7 +198,10 @@ namespace xresource
             return reinterpret_cast<data_type*>(Guid.m_Instance.m_Pointer = pRSC);
         }
 
-        //-------------------------------------------------------------------------
+        typename bool hasResource(full_guid R) const noexcept
+        {
+           return m_ResourceInstance.find(R) != m_ResourceInstance.end();
+        }
 
         template< auto RSC_TYPE_V >
         typename loader<RSC_TYPE_V>::data_type* getResource( def_guid<RSC_TYPE_V>& R ) noexcept
