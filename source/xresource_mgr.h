@@ -381,8 +381,7 @@ namespace xresource
         }
 
         //-------------------------------------------------------------------------
-
-        void CloneRef(full_guid& Dest, const full_guid& URef ) noexcept
+        void CloneFullRef(full_guid& Dest, const full_guid& URef ) noexcept
         {
             if(URef.m_Instance.isValid() && URef.m_Instance.isPointer() )
             {
