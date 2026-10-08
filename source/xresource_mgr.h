@@ -124,9 +124,9 @@ namespace xresource
         ~mgr()
         {
             // If the user have give us ownership of the user data we must free it
-            if ( m_bOwnsUserData && m_pUserData )
+            if ( m_bOwnsUserData && m_pUserData && m_pDeleteUserData )
             {
-                delete m_pUserData;
+                m_pDeleteUserData(m_pUserData);
             }
         }
 
@@ -168,10 +168,14 @@ namespace xresource
 
         //-------------------------------------------------------------------------
 
-        void setUserData( void* pUserData, bool bOwnsUserData ) noexcept
+        template< typename T >
+        void setUserData( T* pUserData, bool bOwnsUserData ) noexcept
         {
             m_pUserData     = pUserData;
             m_bOwnsUserData = bOwnsUserData;
+            // An owned one is deleted as what it is: a delete through void* runs no destructor (and is undefined behavior)
+            if constexpr (std::is_void_v<T>) m_pDeleteUserData = [](void* p) noexcept { ::operator delete(p); };
+            else                             m_pDeleteUserData = [](void* p) noexcept { delete static_cast<T*>(p); };
         }
 
         //-------------------------------------------------------------------------
@@ -538,6 +542,7 @@ namespace xresource
         int                                                         m_CurrentFrame              = 0;
         void*                                                       m_pUserData                 = {};
         bool                                                        m_bOwnsUserData             = {false};
+        void                                                        (*m_pDeleteUserData)(void*) noexcept = nullptr;
     };
 
     //
