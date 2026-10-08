@@ -198,7 +198,7 @@ namespace xresource
             return reinterpret_cast<data_type*>(Guid.m_Instance.m_Pointer = pRSC);
         }
 
-        typename bool hasResource(full_guid R) const noexcept
+        bool hasResource(full_guid R) const noexcept
         {
            return m_ResourceInstance.find(R) != m_ResourceInstance.end();
         }
