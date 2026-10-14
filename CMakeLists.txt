@@ -19,6 +19,7 @@ include(${CMAKE_BINARY_DIR}/_deps/xcmake_tools/Common.cmake)
 add_executable(${TARGET_PROJECT}
   "source/unit_test/xresource_mgr_unit_test_example01.h"
   "source/unit_test/xresource_mgr_unit_test_example01.cpp"
+  "source/unit_test/xresource_mgr_unit_test_update.cpp"
   "source/unit_test/main.cpp"
 )
 

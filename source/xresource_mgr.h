@@ -2,6 +2,7 @@
 #define XRESOURCE_MGR_H
 #pragma once
 
+#include <unordered_set>
 #include <cassert>
 #include <unordered_map>
 #include <array>
@@ -212,8 +213,17 @@ namespace xresource
         {
             using data_type = typename loader<RSC_TYPE_V>::data_type;
 
-            // If we already have the xresource return now
-            if (R.isValid() == false || R.m_Instance.isPointer()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+            // If we already have the xresource return now - unless it was updated since (MarkUpdated): then the reference moves to the new one
+            if (R.isValid() == false) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+            if (R.m_Instance.isPointer())
+            {
+                if (m_Stale.empty() || m_Stale.find(reinterpret_cast<std::uint64_t>(R.m_Instance.m_Pointer)) == m_Stale.end()) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+                full_guid Fresh = getFullGuid(R);
+                if (getResource(Fresh) == nullptr) return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);     // the new one does not load: keep the old one
+                ReleaseRef(R);
+                R.m_Instance = Fresh.m_Instance;
+                return reinterpret_cast<data_type*>(R.m_Instance.m_Pointer);
+            }
 
             if( auto Entry = m_ResourceInstance.find(R); Entry != m_ResourceInstance.end() )
             {
@@ -235,8 +245,16 @@ namespace xresource
 
         void* getResource( full_guid& URef ) noexcept
         {
-            // If we already have the xresource return now
-            if (URef.m_Instance.isPointer()) return URef.m_Instance.m_Pointer;
+            // If we already have the xresource return now - unless it was updated since (MarkUpdated): then the reference moves to the new one
+            if (URef.m_Instance.isPointer())
+            {
+                if (m_Stale.empty() || m_Stale.find(reinterpret_cast<std::uint64_t>(URef.m_Instance.m_Pointer)) == m_Stale.end()) return URef.m_Instance.m_Pointer;
+                full_guid Fresh = getFullGuid(URef);
+                if (getResource(Fresh) == nullptr) return URef.m_Instance.m_Pointer;    // the new one does not load: keep the old one
+                ReleaseRef(URef);
+                URef.m_Instance = Fresh.m_Instance;
+                return URef.m_Instance.m_Pointer;
+            }
 
             if( auto Entry = m_ResourceInstance.find(URef); Entry != m_ResourceInstance.end() )
             {
@@ -256,6 +274,26 @@ namespace xresource
             FullInstanceInfoAlloc(pRSC, URef);
 
             return URef.m_Instance.m_Pointer = pRSC;
+        }
+
+        //-------------------------------------------------------------------------
+        // The resource was updated (compiled again): the data loaded now is old. It stays alive for the references that still hold it;
+        // the next getResource of one of them (or of its GUID) loads the new data and moves that reference over (the old data goes
+        // when its last reference does). So whoever keeps a reference must call getResource on it again (each frame, or before using it),
+        // and rebuild what it made from the data when the pointer it gets back changes. Not loaded: nothing to do.
+        void MarkUpdated( const full_guid& Guid ) noexcept
+        {
+            if (Guid.isValid() == false || Guid.m_Instance.isPointer()) return;
+            auto Entry = m_ResourceInstance.find(Guid);
+            if (Entry == m_ResourceInstance.end()) return;
+            m_Stale.insert(reinterpret_cast<std::uint64_t>(Entry->second->m_pData));
+            m_ResourceInstance.erase(Entry);                // a getResource of the GUID loads it again
+        }
+
+        // Is this resolved reference on data MarkUpdated left behind? (getResource moves it over)
+        bool isStale( const full_guid& URef ) const noexcept
+        {
+            return URef.m_Instance.isValid() && URef.m_Instance.isPointer() && m_Stale.find(reinterpret_cast<std::uint64_t>(URef.m_Instance.m_Pointer)) != m_Stale.end();
         }
 
         //-------------------------------------------------------------------------
@@ -412,8 +450,8 @@ namespace xresource
 
         int getResourceCount() const noexcept
         {
-            assert( m_ResourceInstance.size() == m_ResourceInstanceRelease.size() );
-            return static_cast<int>(m_ResourceInstance.size());
+            assert( m_ResourceInstance.size() + m_Stale.size() == m_ResourceInstanceRelease.size() );
+            return static_cast<int>(m_ResourceInstanceRelease.size());       // (old data still referenced, MarkUpdated, included)
         }
 
         //-------------------------------------------------------------------------
@@ -514,9 +552,10 @@ namespace xresource
 
         void FullInstanceInfoRelease( details::instance_info& RscInfo ) noexcept
         {
-            // Release references in the hashs maps
-            m_ResourceInstance.erase( RscInfo.m_Guid );
+            // Release references in the hashs maps (old data, MarkUpdated: the GUID's entry may be the new data's by now)
+            if (auto It = m_ResourceInstance.find(RscInfo.m_Guid); It != m_ResourceInstance.end() && It->second == &RscInfo) m_ResourceInstance.erase(It);
             m_ResourceInstanceRelease.erase( reinterpret_cast<std::uint64_t>(RscInfo.m_pData) );
+            m_Stale.erase( reinterpret_cast<std::uint64_t>(RscInfo.m_pData) );
 
             // Add this xresource info to the empty chain
             ReleaseRscInfo(RscInfo);
@@ -534,6 +573,7 @@ namespace xresource
         std::unordered_map<type_guid, details::universal_type>      m_RegisteredTypes           = {};
         std::unordered_map<full_guid, details::instance_info*>      m_ResourceInstance          = {};
         std::unordered_map<std::uint64_t, details::instance_info*>  m_ResourceInstanceRelease   = {};
+        std::unordered_set<std::uint64_t>                           m_Stale                     = {};     // data MarkUpdated left behind, still referenced
         details::instance_info*                                     m_pInfoBufferEmptyHead      = { nullptr };
         std::unique_ptr<details::instance_info[]>                   m_InfoBuffer                = {};
         std::size_t                                                 m_MaxResources              = {};

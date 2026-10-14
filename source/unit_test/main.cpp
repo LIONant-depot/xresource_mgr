@@ -1,6 +1,8 @@
 
 #include "xresource_mgr_unit_test_example01.h"
 
+int RunUpdateTests();     // xresource_mgr_unit_test_update.cpp
+
 
 
 int main()
@@ -90,5 +92,5 @@ int main()
     // We are going to fake call this function pretending a frame has pass 
     Mgr.OnEndFrameDelegate();
 
-    return 0;
+    return RunUpdateTests();
 }
